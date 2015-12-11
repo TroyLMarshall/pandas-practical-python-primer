@@ -1,30 +1,41 @@
-"""
-some module to do something class related
-"""
-
-from flask import Flask, jsonify, make_response, request, Response
-from friends_api import datastore, api_helpers
+from flask import Flask, jsonify, make_response, request, Response, g
 from werkzeug.exceptions import BadRequest
+
+from friends_api.datastore import Datastore
 
 app = Flask(__name__)
 
 
-@app.route('/api/v1/friends', methods=["GET"])
+@app.before_request
+def connect_to_datastore():
+    """
+    Establish a connection to the datastore and store it on the 'g' object.
+    """
+    g.datastore = Datastore()
+
+
+@app.teardown_request
+def disconnect_from_datastore(exception):
+    """
+    Close the connection
+    """
+    del g.datastore
+
+
+@app.route('/api/v1/friends', methods=['GET'])
 def friends() -> Response:
     """
-    Returns a representation of the collection of friend resources.
+    Return a representation of the collection of friend resources.
 
     Returns:
         A flask.Response object.
     """
-
-    # DEP_01: Remove dependency on datastore
-    return jsonify({
-        "friends": datastore.friends
-    })
+    #print("friends()")
+    #return jsonify({"friends": "empty"})
+    return jsonify({"friends": g.datastore.friends()})
 
 
-@app.route('/api/v1/friends/<id>', methods=["GET"])
+@app.route('/api/v1/friends/<id>', methods=['GET'])
 def specific_friend(id: str) -> Response:
     """
     Return a representation of a specific friend resource.
@@ -35,93 +46,92 @@ def specific_friend(id: str) -> Response:
     Returns:
         A flask.Response object.
     """
-
-    # DEP_01: Remove dependency on datastore
-    friend = datastore.existing_friend(id)
-    if friend:
-        return  jsonify(friend)
-    else:
-        error_response = make_response(jsonify(
-            {"error": "Friend ID '{friend}' not found.".format(friend=id)}), 404)
+    try:
+        friend = g.datastore.friend(id)
+        return jsonify(friend)
+    except ValueError:
+        error_response = make_response(
+            jsonify({"error": "You have no friends.  LOSER."}), 404)
         return error_response
 
 
-@app.route('/api/v1/friends', methods=["POST"])
+@app.route('/api/v1/friends', methods=['POST'])
 def create_friend() -> Response:
     """
     Create a new friend resource.
 
-    Utilize a JSON  representation/payload in the request object to
+    Utilize a JSON representation/payload in the request object to
     create a new friend resource.
 
     Returns:
         A flask.Response object.
     """
-
-    #DEP_01: Remove dependency on datastore
     try:
-        payload = api_helpers.json_payload(request)
-        api_helpers.required_elements_exist(payload)
+        request_payload = request.get_json()
+    except BadRequest as error:
+        response = make_response(
+            jsonify({"error": "JSON payload contains syntax errors. "
+                              "Please fix and try again."}),
+            400)
+        return response
+
+    try:
+        g.datastore.create_friend(request_payload)
     except ValueError as error:
-        error_response = make_response(jsonify({"error": str(error)}), 400)
-        return error_response
-
-    if datastore.existing_friend(payload['id']):
         response = make_response(
-            jsonify(
-                {"error": "The specified friend resource already exists."}), 400
-            )
-    else:
-        datastore.friends.append({
-                "id": payload["id"],
-                "first_name": payload["firstName"],
-                "last_name": payload["lastName"],
-                "telephone": payload["telephone"],
-                "email": payload["email"],
-                "notes": payload["notes"],
-            })
+            jsonify({"error": str(error)}),
+            400)
+        return response
 
-        response = make_response(
-            jsonify({"message": "Friend resource created."}), 201)
-
+    response = make_response(
+        jsonify({"message": "Friend resource created."}), 201)
     return response
 
-@app.route('/api/v1/friends/<id>', methods=["PUT"])
+
+@app.route('/api/v1/friends/<id>', methods=['PATCH'])
 def update_friend(id: str) -> Response:
     """
-    Update all aspects of a Friend resource.
+    Update an existing friend resource.
 
-    Use a JSON representation to fully update an existing friend resource.
+    Utilize a JSON representation/payload in the request object to
+    updated an existing friend resource.
+
     Args:
-        id: The unique identifier of a Friend resouce
+        id: The unique ID value of a given friend.
 
     Returns:
         A flask.Response object.
     """
     try:
-        payload = api_helpers.json_payload(request)
-        api_helpers.required_elements_exist(payload)
+        request_payload = request.get_json()
+    except BadRequest as error:
+        response = make_response(
+            jsonify({"error": "JSON payload contains syntax errors. "
+                              "Please fix and try again."}),
+            400)
+        return response
+
+    try:
+        g.datastore.update_friend(id, request_payload)
     except ValueError as error:
-        error_response = make_response(jsonify({"error": str(error)}), 400)
-        return error_response
-
-    friend = datastore.existing_friend(payload['id'])
-    if friend:
-        friend.update({
-                "id": payload["id"],
-                "first_name": payload["firstName"],
-                "last_name": payload["lastName"],
-                "telephone": payload["telephone"],
-                "email": payload["email"],
-                "notes": payload["notes"],
-            })
-
         response = make_response(
-            jsonify({"message": "Friend resource {} updated.".format(
-                payload['id'])}))
+            jsonify({"error": str(error)}),
+            400)
         return response
-    else:
+
+    response = make_response(
+        jsonify({"message": "Friend resource updated."}), 201)
+    return response
+
+@app.route('/api/v1/friends/<id>', methods=['DELETE'])
+def destroy_friend(id: str):
+
+    try:
+        g.datastore.destroy_friend(id)
+    except ValueError as error:
         response = make_response(
-            jsonify({"error": "Friend resource {} not found.".format(
-                payload['id'])}), 404)
+            jsonify({"error": str(error)}),
+            400)
         return response
+
+    return jsonify({"message": "Friend resource removed."})
