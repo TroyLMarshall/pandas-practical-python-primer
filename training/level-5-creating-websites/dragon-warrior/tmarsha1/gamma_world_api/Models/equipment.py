@@ -1,7 +1,12 @@
 class Equipment:
 
 
-    def __init__(self, name: str, complexity: str, tech_level: int, price: int, weight, value: int):
+    required_elements = {"name", "complexity", "tech_level", "price",
+                         "weight", "value"}
+
+
+    def __init__(self, name: str, complexity: str, tech_level: str,
+                 price: float, weight: float, value: float):
         self.name = name
         self.complexity = complexity
         self.tech_level = tech_level
